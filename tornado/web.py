@@ -367,6 +367,12 @@ class RequestHandler(object):
             if head_part: html_heads.append(_utf8(head_part))
             body_part = module.html_body()
             if body_part: html_bodies.append(_utf8(body_part))
+        if html_heads:
+            hloc = html.index('</head>')
+            html = html[:hloc] + ''.join(html_heads) + '\n' + html[hloc:]
+        if html_bodies:
+            hloc = html.index('</body>')
+            html = html[:hloc] + ''.join(html_bodies) + '\n' + html[hloc:]
         if js_files:
             # Maintain order of JavaScript files given by modules
             paths = []
@@ -404,12 +410,6 @@ class RequestHandler(object):
                 '\n</style>'
             hloc = html.index('</head>')
             html = html[:hloc] + css + '\n' + html[hloc:]
-        if html_heads:
-            hloc = html.index('</head>')
-            html = html[:hloc] + ''.join(html_heads) + '\n' + html[hloc:]
-        if html_bodies:
-            hloc = html.index('</body>')
-            html = html[:hloc] + ''.join(html_bodies) + '\n' + html[hloc:]
         self.finish(html)
 
     def render_string(self, template_name, **kwargs):
