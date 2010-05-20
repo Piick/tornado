@@ -750,9 +750,9 @@ class FacebookMixin(object):
         expires = args.get("expires")
         self.graph_request(self.async_callback(
             self._on_get_user_info, callback, access_token, expires), 
-            "me", access_token)
+            "me", access_token=access_token)
 
-    def graph_request(self, callback, path, access_token=None, 
+    def graph_request(self, callback, item, path="", access_token=None, 
                       args=None, post_args=None):
         """
         Fetches the given path in the Graph API.
@@ -766,7 +766,7 @@ class FacebookMixin(object):
         
         post_data = urllib.urlencode(post_args) if post_args else None
         method = "POST" if post_args else "GET"
-        url = "https://graph.facebook.com/" + path +"?"+ urllib.urlencode(args)
+        url = self.get_graph_url(item, path, args)
         request = httpclient.HTTPRequest(url, method=method, body=post_data)
         
         http = httpclient.AsyncHTTPClient()
@@ -806,10 +806,14 @@ class FacebookMixin(object):
             "email": user.get("email"),
             "hometown": user.get("hometown", {}).get("name", ""),
             "location": user.get("location", {}).get("name", ""),
-            "pic_50": "http://graph.facebook.com/%s/picture" % user.get('id'),
             "access_token": access_token,
             "access_expires": expires,
         })
+    
+    def get_graph_url(self, item, path, args):
+        return ("https://graph.facebook.com/%s/%s?%s" %
+               (item, path, urllib.urlencode(args)))
+        
     
     def get_user_from_cookie(self):
         """Parses the cookie set by the official Facebook JavaScript SDK.
