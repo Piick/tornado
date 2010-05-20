@@ -739,82 +739,39 @@ class FacebookMixin(object):
         """Fetches the authenticated Facebook user.
 
         The authenticated user includes the special Facebook attributes
-        'session_key' and 'facebook_uid' in addition to the standard
+        'access_token' and 'id' in addition to the standard
         user attributes like 'name'.
         """
-        self.require_setting("facebook_api_key", "Facebook Connect")
-        session = escape.json_decode(self.get_argument("session"))
-        self.facebook_request(
-            method="facebook.users.getInfo",
-            callback=self.async_callback(
-                self._on_get_user_info, callback, session),
-            session_key=session["session_key"],
-            uids=session["uid"],
-            fields="uid,first_name,last_name,name,locale,pic_square," \
-                   "profile_url,username")
-
-    def facebook_request(self, method, callback, **args):
-        """Makes a Facebook API REST request.
-
-        We automatically include the Facebook API key and signature, but
-        it is the callers responsibility to include 'session_key' and any
-        other required arguments to the method.
-
-        The available Facebook methods are documented here:
-        http://wiki.developers.facebook.com/index.php/API
-
-        Here is an example for the stream.get() method:
-
-        class MainHandler(tornado.web.RequestHandler,
-                          tornado.auth.FacebookMixin):
-            @tornado.web.authenticated
-            @tornado.web.asynchronous
-            def get(self):
-                self.facebook_request(
-                    method="stream.get",
-                    callback=self.async_callback(self._on_stream),
-                    session_key=self.current_user["session_key"])
-
-            def _on_stream(self, stream):
-                if stream is None:
-                   # Not authorized to read the stream yet?
-                   self.redirect(self.authorize_redirect("read_stream"))
-                   return
-                self.render("stream.html", stream=stream)
-
-        """
-        self.require_setting("facebook_api_key", "Facebook Connect")
-        self.require_setting("facebook_secret", "Facebook Connect")
-        if not method.startswith("facebook."):
-            method = "facebook." + method
-        args["api_key"] = self.settings["facebook_api_key"]
-        args["v"] = "1.0"
-        args["method"] = method
-        args["call_id"] = str(long(time.time() * 1e6))
-        args["format"] = "json"
-        args["sig"] = self._signature(args)
-        url = "http://api.facebook.com/restserver.php?" + \
-            urllib.urlencode(args)
-        http = httpclient.AsyncHTTPClient()
-        http.fetch(url, callback=self.async_callback(
-            self._parse_response, callback))
-
-    def _on_get_user_info(self, callback, session, users):
-        if users is None:
+        args = self.get_user_from_cookie()
+        access_token = args.get("access_token", None)
+        if not access_token:
             callback(None)
             return
-        callback({
-            "name": users[0]["name"],
-            "first_name": users[0]["first_name"],
-            "last_name": users[0]["last_name"],
-            "uid": users[0]["uid"],
-            "locale": users[0]["locale"],
-            "pic_square": users[0]["pic_square"],
-            "profile_url": users[0]["profile_url"],
-            "username": users[0].get("username"),
-            "session_key": session["session_key"],
-            "session_expires": session.get("expires"),
-        })
+        expires = args.get("expires")
+        self.graph_request(self.async_callback(
+            self._on_get_user_info, callback, access_token, expires), 
+            "me", access_token)
+
+    def graph_request(self, callback, path, access_token=None, 
+                      args=None, post_args=None):
+        """
+        Fetches the given path in the Graph API.
+
+        We translate args to a valid query string. If post_args is given,
+        we send a POST request to the given path with the given arguments.
+        """
+        if not args: args = {}
+        if access_token:
+            (post_args or args)["access_token"] = access_token
+        
+        post_data = urllib.urlencode(post_args) if post_args else None
+        method = "POST" if post_args else "GET"
+        url = "https://graph.facebook.com/" + path +"?"+ urllib.urlencode(args)
+        request = httpclient.HTTPRequest(url, method=method, body=post_data)
+        
+        http = httpclient.AsyncHTTPClient()
+        http.fetch(request, callback=self.async_callback(
+            self._parse_response, callback))
 
     def _parse_response(self, callback, response):
         if response.error:
@@ -827,18 +784,58 @@ class FacebookMixin(object):
             logging.warning("Invalid JSON from Facebook: %r", response.body)
             callback(None)
             return
-        if isinstance(json, dict) and json.get("error_code"):
-            logging.warning("Facebook error: %d: %r", json["error_code"],
-                            json.get("error_msg"))
+        if isinstance(json, dict) and json.get("error"):
+            logging.warning("Facebook error: %d: %r", json["error"]["type"],
+                            json["error"]["message"])
             callback(None)
             return
         callback(json)
 
-    def _signature(self, args):
-        parts = ["%s=%s" % (n, args[n]) for n in sorted(args.keys())]
-        body = "".join(parts) + self.settings["facebook_secret"]
-        if isinstance(body, unicode): body = body.encode("utf-8")
-        return hashlib.md5(body).hexdigest()
+    def _on_get_user_info(self, callback, access_token, expires, user):
+        if user is None:
+            callback(None)
+            return
+        callback({
+            "id": user.get("id"),
+            "name": user.get("name"),
+            "first_name": user.get("first_name"),
+            "last_name": user.get("last_name"),
+            "link": user.get("link"),
+            "birthday": user.get("birthday"),
+            "gender": user.get("gender"),
+            "email": user.get("email"),
+            "hometown": user.get("hometown", {}).get("name", ""),
+            "location": user.get("location", {}).get("name", ""),
+            "pic_50": "http://graph.facebook.com/%s/picture" % user.get('id'),
+            "access_token": access_token,
+            "access_expires": expires,
+        })
+    
+    def get_user_from_cookie(self):
+        """Parses the cookie set by the official Facebook JavaScript SDK.
+    
+        cookies should be a dictionary-like object mapping cookie names to
+        cookie values.
+    
+        If the user is logged in via Facebook, we return a dictionary with the
+        keys "uid" and "access_token". The former is the user's Facebook ID,
+        and the latter can be used to make authenticated requests to the 
+        Graph API.
+        If the user is not logged in, we return None.
+        """
+        self.require_setting("facebook_api_key", "Facebook Connect")
+        self.require_setting("facebook_api_key", "Facebook Connect")
+        cookie = self.get_cookie("fbs_" + self.settings["facebook_api_key"])
+        if not cookie: return None
+        args = dict((k, v[-1]) for k, v in cgi.parse_qs(cookie.strip('"')).items())
+        payload = "".join(k + "=" + args[k] for k in sorted(args.keys())
+                          if k != "sig")
+        sig = hashlib.md5(payload + self.settings["facebook_secret"]).hexdigest()
+        expires = int(args["expires"])
+        if sig == args.get("sig") and (expires == 0 or time.time() < expires):
+            return args
+        else:
+            return None
 
 
 def _oauth_signature(consumer_token, method, url, parameters={}, token=None):
