@@ -743,10 +743,10 @@ class FacebookMixin(object):
         user attributes like 'name'.
         """
         args = self.get_user_from_cookie()
-        access_token = args.get("access_token", None)
-        if not access_token:
+        if not args:
             callback(None)
             return
+        access_token = args["access_token"]
         expires = args.get("expires")
         self.graph_request(self.async_callback(
             self._on_get_user_info, callback, access_token, expires), 
