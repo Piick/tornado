@@ -325,14 +325,20 @@ class RequestHandler(object):
         for part in parts: hash.update(part)
         return hash.hexdigest()
 
-    def redirect(self, url, permanent=False):
+    def redirect(self, url, permanent=False, ssl=None):
         """Sends a redirect to the given (optionally relative) URL."""
         if self._headers_written:
             raise Exception("Cannot redirect after headers have been written")
         self.set_status(301 if permanent else 302)
         # Remove whitespace
         url = re.sub(r"[\x00-\x20]+", "", _utf8(url))
-        self.set_header("Location", urlparse.urljoin(self.request.uri, url))
+        if ssl is not None:
+            scheme = ('https' if ssl else 'http')
+            uri = urlparse.urlunsplit((scheme, self.request.host, 
+                                       self.request.path, "", ""))
+        else:
+            uri = self.request.uri
+        self.set_header("Location", urlparse.urljoin(uri, url))
         self.finish()
 
     def write(self, chunk):
