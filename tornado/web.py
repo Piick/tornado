@@ -140,7 +140,7 @@ class RequestHandler(object):
     def clear(self):
         """Resets all headers and content for this response."""
         self._headers = {
-            "Server": "TornadoServer/0.1",
+            "Server": "TornadoServer/1.0",
             "Content-Type": "text/html; charset=UTF-8",
         }
         if not self.request.supports_http_1_1():
@@ -1030,7 +1030,7 @@ class Application(object):
             self._load_ui_methods(dict((n, getattr(methods, n))
                                        for n in dir(methods)))
         elif isinstance(methods, list):
-            for m in list: self._load_ui_methods(m)
+            for m in methods: self._load_ui_methods(m)
         else:
             for name, fn in methods.iteritems():
                 if not name.startswith("_") and hasattr(fn, "__call__") \
@@ -1042,7 +1042,7 @@ class Application(object):
             self._load_ui_modules(dict((n, getattr(modules, n))
                                        for n in dir(modules)))
         elif isinstance(modules, list):
-            for m in list: self._load_ui_modules(m)
+            for m in modules: self._load_ui_modules(m)
         else:
             assert isinstance(modules, dict)
             for name, cls in modules.iteritems():
@@ -1066,15 +1066,21 @@ class Application(object):
             for spec in handlers:
                 match = spec.regex.match(request.path)
                 if match:
+                    # None-safe wrapper around urllib.unquote to handle
+                    # unmatched optional groups correctly
+                    def unquote(s):
+                        if s is None: return s
+                        return urllib.unquote(s)
                     handler = spec.handler_class(self, request, **spec.kwargs)
                     # Pass matched groups to the handler.  Since
                     # match.groups() includes both named and unnamed groups,
                     # we want to use either groups or groupdict but not both.
-                    kwargs = match.groupdict()
+                    kwargs = dict((k, unquote(v))
+                                  for (k, v) in match.groupdict().iteritems())
                     if kwargs:
                         args = []
                     else:
-                        args = match.groups()
+                        args = [unquote(s) for s in match.groups()]
                     break
             if not handler:
                 handler = ErrorHandler(self, request, 404)
