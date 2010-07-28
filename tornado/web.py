@@ -432,7 +432,8 @@ class RequestHandler(object):
             hloc = html.index('</head>')
             html = html[:hloc] + css + '\n' + html[hloc:]
         self.finish(html)
-
+        return html
+        
     def render_string(self, template_name, **kwargs):
         """Generate the given template with the given arguments.
 
