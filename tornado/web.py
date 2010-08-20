@@ -208,7 +208,8 @@ class RequestHandler(object):
         self._headers[name] = value
 
     _ARG_DEFAULT = []
-    def get_argument(self, name, default=_ARG_DEFAULT, strip=True, error_code=404):
+    def get_argument(self, name, default=_ARG_DEFAULT, strip=True, 
+                     error_code=404):
         """Returns the value of the argument with the given name.
 
         If default is not provided, the argument is considered to be
