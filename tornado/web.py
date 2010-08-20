@@ -208,7 +208,7 @@ class RequestHandler(object):
         self._headers[name] = value
 
     _ARG_DEFAULT = []
-    def get_argument(self, name, default=_ARG_DEFAULT, strip=True):
+    def get_argument(self, name, default=_ARG_DEFAULT, strip=True, error_code=404):
         """Returns the value of the argument with the given name.
 
         If default is not provided, the argument is considered to be
@@ -222,7 +222,7 @@ class RequestHandler(object):
         args = self.get_arguments(name, strip=strip)
         if not args:
             if default is self._ARG_DEFAULT:
-                raise HTTPError(404, "Missing argument %s" % name)
+                raise HTTPError(error_code, "Missing argument %s" % name)
             return default
         return args[-1]
 
