@@ -692,28 +692,48 @@ class FacebookMixin(object):
     required to make requests on behalf of the user later with
     facebook_request().
     """
-    def authenticate_redirect(self, callback_uri=None, cancel_uri=None,
+    def authenticate_redirect(self, redirect_uri=None, 
                               extended_permissions=None):
         """Authenticates/installs this app for the current user."""
-        self.require_setting("facebook_api_key", "Facebook Connect")
-        callback_uri = callback_uri or self.request.path
+        self.require_setting("facebook_app_id", "Facebook Connect")
+        redirect_uri = redirect_uri or self.request.path
         args = {
-            "api_key": self.settings["facebook_api_key"],
-            "v": "1.0",
-            "fbconnect": "true",
-            "display": "page",
-            "next": urlparse.urljoin(self.request.full_url(), callback_uri),
-            "return_session": "true",
+            "client_id": self.settings["facebook_app_id"],
+            "redirect_uri": urlparse.urljoin(self.request.full_url(), 
+                                             redirect_uri),
         }
-        if cancel_uri:
-            args["cancel_url"] = urlparse.urljoin(
-                self.request.full_url(), cancel_uri)
         if extended_permissions:
             if isinstance(extended_permissions, basestring):
                 extended_permissions = [extended_permissions]
-            args["req_perms"] = ",".join(extended_permissions)
-        self.redirect("http://www.facebook.com/login.php?" +
+            args["scope"] = ",".join(extended_permissions)
+        self.redirect("https://graph.facebook.com/oauth/authorize?" +
                       urllib.urlencode(args))
+
+    def fetch_access_token(self, callback, code, redirect_uri=None):
+        self.require_setting("facebook_app_id", "Facebook Connect")
+        self.require_setting("facebook_secret", "Facebook Connect")
+        redirect_uri = redirect_uri or self.request.path
+        args = {
+            "client_id": self.settings["facebook_app_id"],
+            "client_secret": self.settings["facebook_secret"],
+            "code": code,
+            "redirect_uri": urlparse.urljoin(self.request.full_url(), 
+                                             redirect_uri)
+        }
+        url = "https://graph.facebook.com/oauth/access_token?" + \
+              urllib.urlencode(args)
+        request = httpclient.HTTPRequest(url)
+        
+        http = httpclient.AsyncHTTPClient()
+        http.fetch(request, callback=self.async_callback(
+            self._on_fetch_access_token, callback))
+
+    def _on_fetch_access_token(self, callback, response):
+        try:
+            access_token = urlparse.parse_qs(response.body)["access_token"][-1]
+        except (TypeError, KeyError):
+            access_token = None
+        callback(access_token)
 
     def authorize_redirect(self, extended_permissions, callback_uri=None,
                            cancel_uri=None):
@@ -736,22 +756,23 @@ class FacebookMixin(object):
         self.authenticate_redirect(callback_uri, cancel_uri,
                                    extended_permissions)
 
-    def get_authenticated_user(self, callback):
+    def get_authenticated_user(self, callback, access_token=None, expires=None):
         """Fetches the authenticated Facebook user.
 
         The authenticated user includes the special Facebook attributes
         'access_token' and 'id' in addition to the standard
         user attributes like 'name'.
         """
-        args = self.get_user_from_cookie()
-        if not args:
-            callback(None)
-            return
-        access_token = args["access_token"]
-        expires = args.get("expires")
-        self.graph_request(self.async_callback(
-            self._on_get_user_info, callback, access_token, expires), 
-            "me", access_token=access_token)
+        if not access_token:
+            args = self.get_user_from_cookie()
+            if not args:
+                callback(None)
+                return
+            access_token = args["access_token"]
+            expires = args["expires"]
+        callback = self.async_callback(self._on_get_user_info, callback, 
+                                       access_token, expires) 
+        self.graph_request(callback, "me", access_token=access_token)
 
     def graph_request(self, callback, item, path="", access_token=None, 
                       args=None, post_args=None):
@@ -763,7 +784,7 @@ class FacebookMixin(object):
         """
         if not args: args = {}
         if access_token:
-            (post_args or args)["access_token"] = access_token
+            args["access_token"] = access_token
         
         post_data = urllib.urlencode(post_args) if post_args else None
         method = "POST" if post_args else "GET"
@@ -812,9 +833,10 @@ class FacebookMixin(object):
         })
     
     def get_graph_url(self, item, path, args):
-        return ("https://graph.facebook.com/%s/%s?%s" %
-               (item, path, urllib.urlencode(args)))
-        
+        url = ("https://graph.facebook.com/%s/%s" % (item, path))
+        if args:
+            url += "?%s" % urllib.urlencode(args)
+        return url
     
     def get_user_from_cookie(self):
         """Parses the cookie set by the official Facebook JavaScript SDK.
