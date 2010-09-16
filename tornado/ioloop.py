@@ -35,8 +35,8 @@ try:
     import fcntl
 except ImportError:
     if os.name == 'nt':
-        import win32_support
-        import win32_support as fcntl
+        from tornado import win32_support
+        from tornado import win32_support as fcntl
     else:
         raise
 
@@ -60,7 +60,7 @@ class IOLoop(object):
                 try:
                     connection, address = sock.accept()
                 except socket.error, e:
-                    if e[0] not in (errno.EWOULDBLOCK, errno.EAGAIN):
+                    if e.args[0] not in (errno.EWOULDBLOCK, errno.EAGAIN):
                         raise
                     return
                 connection.setblocking(0)
@@ -114,8 +114,8 @@ class IOLoop(object):
             self._set_nonblocking(w)
             self._set_close_exec(r)
             self._set_close_exec(w)
-            self._waker_reader = os.fdopen(r, "r", 0)
-            self._waker_writer = os.fdopen(w, "w", 0)
+            self._waker_reader = os.fdopen(r, "rb", 0)
+            self._waker_writer = os.fdopen(w, "wb", 0)
         else:
             self._waker_reader = self._waker_writer = win32_support.Pipe()
             r = self._waker_writer.reader_fd
@@ -231,8 +231,8 @@ class IOLoop(object):
                 # two ways EINTR might be signaled:
                 # * e.errno == errno.EINTR
                 # * e.args is like (errno.EINTR, 'Interrupted system call')
-                if (getattr(e, 'errno') == errno.EINTR or
-                    (isinstance(getattr(e, 'args'), tuple) and
+                if (getattr(e, 'errno', None) == errno.EINTR or
+                    (isinstance(getattr(e, 'args', None), tuple) and
                      len(e.args) == 2 and e.args[0] == errno.EINTR)):
                     logging.warning("Interrupted system call", exc_info=1)
                     continue
@@ -255,7 +255,7 @@ class IOLoop(object):
                 except (KeyboardInterrupt, SystemExit):
                     raise
                 except (OSError, IOError), e:
-                    if e[0] == errno.EPIPE:
+                    if e.args[0] == errno.EPIPE:
                         # Happens when the client closes the connection
                         pass
                     else:
@@ -370,9 +370,10 @@ class PeriodicCallback(object):
         self.callback = callback
         self.callback_time = callback_time
         self.io_loop = io_loop or IOLoop.instance()
-        self._running = True
+        self._running = False
 
     def start(self):
+        self._running = True
         timeout = time.time() + self.callback_time / 1000.0
         self.io_loop.add_timeout(timeout, self._run)
 
@@ -387,7 +388,8 @@ class PeriodicCallback(object):
             raise
         except:
             logging.error("Error in periodic callback", exc_info=True)
-        self.start()
+        if self._running:
+            self.start()
 
 
 class _EPoll(object):
