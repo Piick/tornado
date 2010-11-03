@@ -48,6 +48,7 @@ class GoogleHandler(tornado.web.RequestHandler, tornado.auth.GoogleMixin):
 import base64
 import binascii
 import cgi
+import functools
 import hashlib
 import hmac
 import logging
@@ -847,9 +848,10 @@ class FacebookMixin(object):
             expires = args["expires"]
         callback = self.async_callback(self._on_get_user_info, callback, 
                                        access_token, expires) 
-        self.graph_request(callback, "me", access_token=access_token)
+        FacebookMixin.graph_request(callback, "me", access_token=access_token)
 
-    def graph_request(self, callback, item, path="", access_token=None, 
+    @staticmethod
+    def graph_request(callback, item, path="", access_token=None, 
                       args=None, post_args=None):
         """
         Fetches the given path in the Graph API.
@@ -863,14 +865,15 @@ class FacebookMixin(object):
         
         post_data = urllib.urlencode(post_args) if post_args else None
         method = "POST" if post_args else "GET"
-        url = self.get_graph_url(item, path, args)
+        url = FacebookMixin.get_graph_url(item, path, args)
         request = httpclient.HTTPRequest(url, method=method, body=post_data)
         
         http = httpclient.AsyncHTTPClient()
-        http.fetch(request, callback=self.async_callback(
-            self._parse_response, callback))
+        http.fetch(request, callback=functools.partial(
+            FacebookMixin._parse_response, callback))
 
-    def _parse_response(self, callback, response):
+    @staticmethod
+    def _parse_response(callback, response):
         if response.error:
             logging.warning("HTTP error from Facebook: %s", response.error)
             callback(None)
@@ -888,7 +891,8 @@ class FacebookMixin(object):
             return
         callback(json)
 
-    def _on_get_user_info(self, callback, access_token, expires, user):
+    @staticmethod
+    def _on_get_user_info(callback, access_token, expires, user):
         if user is None:
             callback(None)
             return
@@ -907,12 +911,20 @@ class FacebookMixin(object):
             "access_expires": expires,
         })
     
-    def get_graph_url(self, item, path, args):
+    @staticmethod
+    def get_graph_url(item, path, args):
         url = ("https://graph.facebook.com/%s/%s" % (item, path))
         if args:
             url += "?%s" % urllib.urlencode(args)
         return url
     
+    def get_access_token_from_cookie(self):
+        cookie_args = self.get_user_from_cookie()
+        if cookie_args:
+            return cookie_args["access_token"]
+        else:
+            return None
+        
     def get_user_from_cookie(self):
         """Parses the cookie set by the official Facebook JavaScript SDK.
     
