@@ -78,7 +78,7 @@ class OpenIdMixin(object):
         all those attributes for your app, you can request fewer with
         the ax_attrs keyword argument.
         """
-        callback_uri = callback_uri or self.request.path
+        callback_uri = callback_uri or self.request.uri
         args = self._openid_args(callback_uri, ax_attrs=ax_attrs)
         self.redirect(self._OPENID_ENDPOINT + "?" + urllib.urlencode(args))
 
@@ -281,7 +281,7 @@ class OAuthMixin(object):
             signature = _oauth10a_signature(consumer_token, "GET", url, args)
         else:
             signature = _oauth_signature(consumer_token, "GET", url, args)
-            
+
         args["oauth_signature"] = signature
         return url + "?" + urllib.urlencode(args)
 
@@ -327,7 +327,7 @@ class OAuthMixin(object):
             logging.warning("Could not fetch access token")
             callback(None)
             return
-        
+
         access_token = _oauth_parse_response(response.body)
         user = self._oauth_get_user(access_token, self.async_callback(
              self._on_oauth_get_user, access_token, callback))
@@ -704,7 +704,7 @@ class GoogleMixin(OpenIdMixin, OAuthMixin):
         You can authorize multiple resources by separating the resource
         URLs with a space.
         """
-        callback_uri = callback_uri or self.request.path
+        callback_uri = callback_uri or self.request.uri
         args = self._openid_args(callback_uri, ax_attrs=ax_attrs,
                                  oauth_scope=oauth_scope)
         self.redirect(self._OPENID_ENDPOINT + "?" + urllib.urlencode(args))
@@ -957,7 +957,7 @@ class FacebookGraphMixin(OAuth2Mixin):
     _OAUTH_NO_CALLBACKS = False
 
     def get_authenticated_user(self, redirect_uri, client_id, client_secret,
-                              code, callback):
+                              code, callback, extra_fields=None):
       """ Handles the login for the Facebook user, returning a user object.
 
       Example usage:
@@ -990,42 +990,48 @@ class FacebookGraphMixin(OAuth2Mixin):
         "client_secret": client_secret,
       }
 
+      if extra_fields and not isinstance(extra_fields, (set, frozenset)):
+          extra_fields = set(extra_fields)
+
       http.fetch(self._oauth_request_token_url(**args),
           self.async_callback(self._on_access_token, redirect_uri, client_id,
-                              client_secret, callback))
+                              client_secret, callback, extra_fields))
 
     def _on_access_token(self, redirect_uri, client_id, client_secret,
-                        callback, response):
+                        callback, extra_fields, response):
+      if response.error:
+          logging.warning('Facebook auth error: %s' % str(response))
+          callback(None)
+          return
+
       session = {
-      "access_token": cgi.parse_qs(response.body)["access_token"][-1],
-      "expires": cgi.parse_qs(response.body).get("expires")
+          "access_token": cgi.parse_qs(response.body)["access_token"][-1],
+          "expires": cgi.parse_qs(response.body).get("expires")
       }
 
       self.facebook_request(
           path="/me",
           callback=self.async_callback(
-              self._on_get_user_info, callback, session),
+              self._on_get_user_info, callback, session, extra_fields),
           access_token=session["access_token"],
-          fields="picture"
+          fields="picture" # This one's exceptional in that it appends to fields returned
           )
 
 
-    def _on_get_user_info(self, callback, session, user):
+    def _on_get_user_info(self, callback, session, extra_fields, user):
         if user is None:
             callback(None)
             return
-        callback({
-            "name": user["name"],
-            "first_name": user["first_name"],
-            "last_name": user["last_name"],
-            "id": user["id"],
-            "locale": user["locale"],
-            "picture": user.get("picture"),
-            "link": user["link"],
-            "username": user.get("username"),
-            "access_token": session["access_token"],
-            "session_expires": session.get("expires"),
-        })
+
+        fields = set(['id', 'name', 'first_name', 'last_name', 'locale', 'picture', 'link'])
+        if extra_fields: fields.update(extra_fields)
+
+        fieldmap = {}
+        for field in fields:
+            fieldmap[field] = user.get(field)
+
+        fieldmap.update({"access_token": session["access_token"], "session_expires": session.get("expires")})
+        callback(fieldmap)
 
     def facebook_request(self, path, callback, access_token=None,
                            post_args=None, **args):
