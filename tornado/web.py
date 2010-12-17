@@ -800,12 +800,12 @@ class RequestHandler(object):
         def wrapper(*args, **kwargs):
             try:
                 return callback(*args, **kwargs)
-            except Exception, e:
+            except Exception:
                 if self._headers_written:
                     logging.error("Exception after headers written",
                                   exc_info=True)
                 else:
-                    self._handle_request_exception(e)
+                    self._handle_request_exception(*sys.exc_info())
         return wrapper
 
     def require_setting(self, name, feature="this feature"):
@@ -818,7 +818,7 @@ class RequestHandler(object):
         return self.application.reverse_url(name, *args)
 
     def _stack_context_handle_exception(self, type, value, traceback):
-        self._handle_request_exception(value)
+        self._handle_request_exception(type, value, traceback)
         return True
 
     def _execute(self, transforms, *args, **kwargs):
@@ -863,7 +863,7 @@ class RequestHandler(object):
         return self.request.method + " " + self.request.uri + " (" + \
             self.request.remote_ip + ")"
 
-    def _handle_request_exception(self, e):
+    def _handle_request_exception(self, type, e, traceback):
         if isinstance(e, HTTPError):
             if e.log_message:
                 format = "%d %s: " + e.log_message
@@ -871,12 +871,12 @@ class RequestHandler(object):
                 logging.warning(format, *args)
             if e.status_code not in httplib.responses:
                 logging.error("Bad HTTP status code: %d", e.status_code)
-                self.send_error(500, exception=e)
+                self.send_error(500, exception=(type, e, traceback))
             else:
-                self.send_error(e.status_code, exception=e)
+                self.send_error(e.status_code, exception=(type, e, traceback))
         else:
             logging.error("Uncaught exception %s\n%r", self._request_summary(),
-                          self.request, exc_info=e)
+                          self.request, exc_info=(type, e, traceback))
             self.send_error(500, exception=e)
 
     def _ui_module(self, name, module):
