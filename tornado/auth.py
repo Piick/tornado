@@ -913,7 +913,9 @@ class FacebookMixin(object):
     
     @staticmethod
     def get_graph_url(item, path, args):
-        url = ("https://graph.facebook.com/%s/%s" % (item, path))
+        url = ("https://graph.facebook.com/%s" % item)
+        if path:
+            url += "/%s" %path
         if args:
             url += "?%s" % urllib.urlencode(args)
         return url
